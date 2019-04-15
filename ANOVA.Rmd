@@ -1,0 +1,171 @@
+---
+title: "ANOVA"
+author: "Your name here"
+date: "4/16/2019"
+output: 
+  html_document:
+    keep_md: yes
+---
+
+
+### Create new project with NHANES data
+
+I hope you are all using RStudio projects to manage your files and organize your work. Create a new project in a directory on your computer than contains the data files and skeleton script for today's class.
+
+### Load tidyverse package
+
+```{r, message = FALSE}
+library(tidyverse)
+```
+
+### About NHANES
+
+The data we're going to work with comes from the National Health and Nutrition Examination Survey (NHANES) program at the CDC. You can read a lot more about NHANES on the [CDC's website](http://www.cdc.gov/nchs/nhanes/) or [Wikipedia](https://en.wikipedia.org/wiki/National_Health_and_Nutrition_Examination_Survey). 
+
+NHANES is a research program designed to assess the health and nutritional status of adults and children in the United States.
+
+### Import & inspect
+
+Now, let's load the data and take a look.
+
+```{r loaddata}
+nh <- read_csv("nhanes.csv")
+nh
+```
+
+Let's convert all character variables to factor variables using dplyr's `mutate_if`
+
+And let's remove the children so that all of our analyses will be on adults
+
+```{r}
+nh <- nh %>% mutate_if(is.character, as.factor) %>%
+  filter(Age >= 18)
+```
+
+## Relationship between ANOVA, t-test and linear regression
+
+Where t-tests and their nonparametric alternatives are used for assessing the differences in means between two groups, ANOVA is used to assess the significance of differences in means between multiple groups. 
+
+In fact, a t-test is just a specific case of ANOVA when you only have two groups. And both t-tests and ANOVA are just specific cases of linear regression, where you're trying to fit a model describing how a continuous outcome (e.g., BMI) changes with some predictor variable (e.g., diabetic status, race, age, etc.). Typically when we have a discrete predictor, we call it ANOVA and when we have a continuous predictor, we call it linear regression. However, we can perform linear regression with a categorical predictor too. 
+
+So what is the real difference?
+
+Well, the distinction is largely semantic. With a linear model you're asking, "do levels of a categorical variable affect the response?" where with ANOVA or t-tests you're asking, "does the mean response differ between levels of a categorical variable?"
+
+Let's examine the relationship between Height and relationship status (`RelationshipStatus` was derived from `MaritalStatus`, coded as _Committed_ if MaritalStatus is Married or LivePartner, and _Single_ otherwise). Let's first do this with a t-test, and for now, let's assume that the variances between groups _are_ equal.
+
+```{r}
+#EDA
+nh %>%
+  filter(!is.na(RelationshipStatus)) %>%
+  ggplot(aes(Height, col = RelationshipStatus, fill = RelationshipStatus)) +
+  geom_density(alpha = .5)
+
+#equal var and normal --> pooled var t-test
+t.test(Height~RelationshipStatus, data=nh, var.equal=TRUE)
+```
+It looks like single people have a lower mean height than those in a committed relationship. This difference of 2 inches is trivial, but is none the less, statistically significant. 
+
+Let's do the same test in a linear modeling framework. First, let's create the fitted model and store it in an object called `fit`. 
+
+```{r}
+fit <- lm(Height~RelationshipStatus, data=nh)
+```
+
+You can display the object itself, but that isn't too interesting. You can get the more familiar ANOVA table by calling the `anova()` function on the `fit` object. More generally, the `summary()` function on a linear model object will tell you much more. (Note this is different from dplyr's **summarize** function).
+
+```{r}
+fit
+anova(fit)
+TukeyHSD(aov(fit))
+
+summary(fit)
+```
+
+Go back and re-run the t-test assuming equal variances as we did before. Now notice a few things:
+
+```{r}
+t.test(Height~RelationshipStatus, data=nh, var.equal=TRUE)
+```
+
+1. The p-values from all three tests (t-test, ANOVA, and linear regression) are all identical (p=3.03e-08). This is because the tests are all identical: a t-test _is_ a specific case of ANOVA, which _is_ a specific case of linear regression. 
+
+1. The test statistics are all related. The _t_ statistic from the t-test is **5.552**, which is the same as the t-statistic from the linear regression. If you square that, you get **30.83**, the _F_ statistic from the ANOVA. 
+
+1. The `t.test()` output shows you the means for the two groups, Committed and Single. Just displaying the `fit` object itself or running `summary(fit)` shows you the coefficients for a linear model. Here, the model assumes the "baseline" RelationshipStatus level is _Committed_ (first alphabetically), and that the _intercept_ in a regression model (e.g., $\beta_{0}$ in the model $Y = \beta_{0} +  \beta_{1}X$) is the mean of the baseline group (169.5930 is the mean Height for Committed people). Being _Single_ results in a decrease in Height of 1.94 cm. This is the $\beta_{1}$ coefficient in the model. You can easily change the ordering of the levels. See the help for `?factor`, and check out the [**forcats** package](http://forcats.tidyverse.org/), which provides tools **for** manipulating **cat**egorical variables.
+
+## ANOVA with 3+ groups
+
+Recap: t-tests are for assessing the differences in means between _two_ groups. A t-test is a specific case of ANOVA, which is a specific case of a linear model. Let's run ANOVA, but this time looking for differences in means between more than two groups.
+
+Let's look at the relationship between smoking status (Never, Former, or Current), and Height.
+
+```{r}
+fit1 <- lm(Height~SmokingStatus, data=nh)
+
+summary(fit1)
+```
+
+The F-test on the ANOVA table tells us that there _is_ a significant difference in means between current, former, and never smokers (p=$< 2.2*10^{-16}$). However, the linear model output might not have been what we wanted. Because the default handling of categorical variables is to treat the alphabetical first level as the baseline, "Current" smokers are treated as baseline, and this mean becomes the intercept, and the coefficients on "Former" and "Never" describe how those groups' means differ from current smokers. 
+
+What if we wanted "Never" smokers to be the baseline, followed by Former, then Current? Have a look at `?factor` and `?relevel` to change the factor levels. As mentioned above, if you are dealing with several factor variables or factor variables with many levels, the **forcats** package is a great resource.
+
+```{r, results="hide"}
+?factor
+# Look at nha$SmokingStatus
+nh$SmokingStatus
+```
+
+Let's relevel Smoking Status to make 'Never' the reference categrory. Then we'll take a look
+```{r}
+factor(nh$SmokingStatus, levels = c('Never', 'Former', 'Current'))
+```
+
+If we're happy with that, let's change the value of nha$SmokingStatus in place. I'm showing the dplyr way using mutate
+```{r}
+nh <- nh %>% 
+  mutate(SmokingStatus=factor(SmokingStatus, levels = c('Never', 'Former', 'Current')))
+```
+
+Re-fit the model then look at the ANOVA and LM summaries
+```{r}
+fit1 <- lm(Height~SmokingStatus, data=nh)
+
+# Show the ANOVA table
+anova(fit1)
+
+# Print the full model statistics
+summary(fit1)
+```
+
+Notice that the p-value on the ANOVA/regression didn't change, but the coefficients did. _Never_ smokers are now treated as baseline. The intercept coefficient (167.5076) is now the mean Height for _Never_ smokers. The `SmokingStatusFormer` coefficient of 2.2938 shows the average increase in Height that former smokers have when compared to never smokers, and that difference is statistically significant (2.61e-08). 
+
+The `SmokingStatusCurrent` coefficient of 3.9685 shows that current smokers  have a higher Height than never smokers, and that this increase is highly significant.
+
+Finally, you can do the typical post-hoc ANOVA procedures on the fit object. For example, the `TukeyHSD()` function will run [_Tukey's test_](https://en.wikipedia.org/wiki/Tukey%27s_range_test) (also known as _Tukey's range test_, the _Tukey method_, _Tukey's honest significance test_, _Tukey's HSD test_ (honest significant difference), or the _Tukey-Kramer method_). Tukey's test computes all pairwise mean difference calculation, comparing each group to each other group, identifying any difference between two groups that's greater than the standard error, while controlling the type I error for all multiple comparisons. First run `aov()` (**not** `anova()`) on the fitted linear model object, then run `TukeyHSD()` on the resulting analysis of variance fit.
+
+```{r}
+TukeyHSD(aov(fit1))
+plot(TukeyHSD(aov(fit1)))
+```
+
+This output shows the pairwise differences between each combination. Conducting 3 t-tests to compare groups would increase the type 1 error rate, and is not appropriate. Tukey's HSD accounts for multiple testing.
+
+### Diagnostics
+
+Remember that the assumptions of ANOVA are:
+
+- Random sampling
+- Independent samples
+- Normality of residuals
+- Constant variance (homoscedasticity)
+
+We looked for equal variance in our density plot and though we used that plot to assess normality, the true assumption is normality of the residuals. We can pull out the residuals from the fit object using `$residuals`
+
+Because the residuals are a vector, it will be easier to use the base R function `qqnorm()` than the ggplot2 `geom_qq()`
+
+```{r}
+qqnorm(fit1$residuals); qqline(fit1$residuals)
+```
+
+These look great, so we are happy with the model diagnostics
